@@ -1,3 +1,5 @@
+use rand::random;
+
 const RAM_SIZE: usize = 4096;
 const NUM_REGS: usize = 16; // V Registers for games to use
 const STACK_SIZE: usize = 16;
@@ -71,8 +73,127 @@ impl Emu {
     pub fn tick(&mut self){
         // Fetch value of game from RAM
         let op = self.fetch();
-        // Decode
-        // Execute
+        // Decode and execute
+        self.execute(op);
+    }
+
+    fn execute(&mut self, op: u16){
+        let digit1 = (op & 0xF000) >> 12;
+        let digit2 = (op & 0x0F00) >> 8;
+        let digit3 = (op & 0x00F0) >> 4;
+        let digit4 = op & 0x000F;
+        
+        // Implementation of opcodes
+        match (digit1, digit2, digit3, digit4){
+            // NOP
+            (0, 0, 0, 0) => return,
+
+            //Clear Screen
+            (0, 0, 0xE, 0) => {
+                self.screen = [false; SCREEN_WIDTH * SCREEN_HEIGHT];
+            },
+
+            // Return from Subroutine/Functions
+            // Push off address where function is run off the stack
+            (0, 0, 0xE, 0xE) =>{
+                let ret_addr = self.pop();
+                self.pc = ret_addr;
+            },
+
+            // Jump to given address
+            // 1NNN
+            (1, _, _, _)  => {
+                self.pc = op & 0xFFF;
+            },
+
+            // Call subroutine/function
+            (2, _, _, _)=>{
+                let nnn = op & 0xFFF;
+                self.push(self.pc);
+                self.pc = nnn;
+            },
+
+            // 3XNN, skip next if VX == NN
+            // X is what register to use, NN is raw value
+            // Remember V registers are registers a game/program can use
+            (3, _, _, _) =>{
+                let x = digit2 as usize;
+                let nn = (op & 0xFF) as u8;
+                if self.v_reg[x] == nn{
+                    self.pc += 2; // SKip instruction
+                }
+            },
+
+            // 4XNN, skip next if VX != NN
+
+            (4, _, _, _) =>{
+                let x = digit2 as usize;
+                let nn = (op & 0xFF) as u8;
+                if self.v_reg[x] != nn{
+                    self.pc += 2;
+                }
+            },
+
+            // 5XY0, use third digit to check if VX == VY
+
+            (5, _, _, 0) =>{
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+                if self.v_reg[x] == self.v_reg[y]{
+                    self.pc == 2;
+                }
+            },
+
+            // 9XY0, skip if VX != VY
+            (9, _, _, 0) =>{
+                let x = digit2 as usize;
+                let y = digit3 as usize;
+                if self.v_reg[x] != self.v_reg[y]{
+                    self.pc += 2;
+                }
+            },
+
+            // Use I Register, address pointer to RAM
+            // ANNN - I = NNN, set set the address pointer to NNN
+
+            (0xA, _, _, _) => {
+                let nnn = op & 0xFFF;
+                self.i_reg = nnn;
+            },
+
+            
+            // BNNN, uses V0 register move PC = V0 + value in opcode
+
+            (0xB, _, _, _) =>{
+                self.pc = (self.v_reg[0] as u16) + op & 0xFFF;
+            }
+
+            // CXNN - VX = rand() & NN
+            // Add RNG support
+            (0xC, _, _, _) =>{
+                let x = digit2 as usize;
+                let nn = (op & 0xFF) as u8;
+                let rng: u8 = random();
+                self.v_reg[x] = rng & nn;
+            }
+
+            // Unknown opcode
+            // _ means compiler must expect a value from this as it is going to interpret it
+            (_,_,_,_,) => unimplemented!("Unimplemented opcode: {}", op), // Demands that all options are taken care of, unimplemented! macro used to panic it it reaches that point
+        }
+    }
+
+    pub fn tick_timers(&mut self){
+        if self.dt > 0{
+            self.dt -= 1;
+        }
+        
+        if self.st > 0{
+            if self.st == 1{
+                // Beep
+            }
+            self.st -= 1;
+        }
     }
 
     fn fetch(&mut self) -> u16{
@@ -81,6 +202,7 @@ impl Emu {
         let lower_byte = self.ram[(self.pc + 1) as usize] as u16; // OOOX Extract LSB
         let op = (higher_byte << 8) | lower_byte; // OXXO Extract middle values
         self.pc += 2; // Since read 2 bytes of data
+        op
     }
 
     pub fn new() -> Self {
